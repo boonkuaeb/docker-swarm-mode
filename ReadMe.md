@@ -115,7 +115,7 @@ vs
 docker container -h
 ```
 
-**Create Service Create Container**
+#3. Create Service Create Container
 ``` 
 docker service create --name web --publish 8080:80 nginx
 ```
@@ -180,29 +180,131 @@ Stop Container `docker stop ID`
 - Check new result `Requests per second:    272.35 [#/sec] (mean)`. this mean double Throughput(Good).
 - Solt: 1 CPU = 1 Container
 
-#3. Adding nodes
+#4. Adding nodes
 **Remove node**
-- `docker swarm leave --force`. used the `--force` for last node.
+- `docker swarm leave --force`. used the `--force` for self node.
 
 **Creating and Managing VMs with docker Machine**
-We have two option for create Node
-- Using Docker Machine
-    - `docker-machine create -d virtualbox  m1`
-    - `docker-machine env m1`
-    - `eval $(docker-machine env m1)`
-    - `docker-machine ssh m1`
-    - Remove `docker-machine rm m1`
-- Using Vagrant
-    - Check Vagrantfile
+
+- We have two option for create Node
+    - Using Docker Machine
+        - `docker-machine create -d virtualbox  m1`
+        - `docker-machine env m1`
+        - `eval $(docker-machine env m1)`
+        - `docker-machine ssh m1`
+        - Remove `docker-machine rm m1`
+    - Using Vagrant
+        - Check docker-swarm-mode-getting-started/Vagrantfile
+- Launching 3 VMs with `vagrant up`
+    - `vagrant up m1 w1 w2`
+    - `vagrant status`
     
+- Accessing the Docker Engine In VMs
+    - `vargrant ssh m1`
+    - `export DOCKER_HOST=192.168.99.201`
+    - `docker info | grep Name`
+    - `docker ps`
+    - `docker images ls`
     
+- docker swarm init --advertise-addr command
+    - `export DOCKER_HOST=192.168.99.201`
+    - `docker swarm init --advertise-addr 192.168.99.201:2377 --listen-addr 192.168.99.201:2377`
+    - Check `docker info | grep Swarm`. It shows `Swarm: active`
+    - Reference :  [How nodes work](https://docs.docker.com/engine/swarm/how-swarm-mode-works/nodes/)
+
+- Joining workers node
+    - `export DOCKER_HOST=192.168.99.211`
+    - Join 
+        ```docker
+        docker swarm join --token SWMTKN-1-2lvpl5x8o812d0iuqud5icrv13q8v62ssc4lsrw2plk43lzujp-8cyjkk81q4n6u6nou0ykaw8ig 192.168.99.201:2377
+        ``` 
+- Creating a Service to Visualize Our Cluster State
+    - Crete _docker-swarm-visualizer container_
+        - ```
+          docker service create --name viz \
+          --publish 8090:8080 \
+          --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+          --constraint=node.role==manager \
+           dockersamples/visualizer
+           ```
+        - `docker service ls`
+        - `docker service ps viz`
+        - `open http://192.168.99.201:8090/`. Can not uses localhost
+- What happen when a Node shutdown.
+    - Check Node Down `docker node ls | grep Down`
+    - Check viz `open http://192.168.99.201:8090/`
+    - Example. Remove a Node
+        - `export DOCKER_HOST=192.168.99.212 `
+        - `docker swarm leave`
+        - `docker node rm w2`
+    - Re-Joining Node
+        - `docker swarm join-token worker`
+        - `export DOCKER_HOST=192.168.99.212`
+        - `docker swarm join --token SWMTKN-1-2lvpl5x8o812d0iuqud5icrv13q8v62ssc4lsrw2plk43lzujp-8cyjkk81q4n6u6nou0ykaw8ig 192.168.99.201:2377`
+
+- Creating and Scaling service
+    - `export DOCKER_HOST=192.168.99.201`
+    - `docker pull  swarmgs/customer`
+    - ```
+      docker service create --name customer-api \
+      --publish 3000:3000 \
+      swarmgs/customer
+      ```
+    -  Scale: `docker service scale customer-api=2`
+    -  Scale: `docker service scale customer-api=3`
+- Spread Strategy and Test Throughput of Scale service
+    - `open http://192.168.99.201:3000/customer/1`
+    - Scale up to 3 container `docker service scale customer-api=3`
+    - Load Test 
+        - Scale down to 1 container `docker service scale customer-api=1`
+        - `ab -n 1000 -c 4 http://192.168.99.201:3000/customer/1`
+        - Review `Requests per second:    88.51 [#/sec] (mean)`
+        - Scale up to 4 container `docker service scale customer-api=4`
+        - Review `Requests per second:    271.03 [#/sec] (mean)`
+
+- Inspecting Nodes and Clustering Gotchas
+    - `docker node ls` list of the node
+    - `docker node inspect w2` 
+        - Ip address
+        - OS
+        - Resource CPU, MEM        
+    - Test scale down to 1 `docker service scale customer-api=1`
+        - `m1` has viz task
+        - `w1` has customer-api task
+        - `w2` has note any task
+    - `docker ps` : show only container on self node.
+    - `docker network ls` : check `ingress`
+    - `docker network inspect ingress` : show self node network info. we using peer node.
     
+- List Task per Nodes(If not install `viz`)
+    - `docker node ps m1` : check all task running on `m1` node.
+    - `docker node ps m1 w1 w2`   
+- Promoting a Worker to a Manager 
+    - `docker node promote w2`. `w2` 's Manager Status will change to Manager `Reachable`. It use full for some to bing manager online quickly.
+    - `docker node demote w2`
 
-
-
-
-
-
+- Draining a Node to Perform Maintenance
+    - Check command `docker node update -h`
+    - Use case : update `w1`
+        - `docker node update --availability=drain w1` It will move task to another node. So we can update path etc.
+        - `docker node update --availability=active w1` The task will not re-balance.
+        - Re-Balance
+            - `docker service scale customer-api=2`
+            - `docker service scale customer-api=1`
+- One Container per Node with Global Services
+    - By default mode is replicated but we have difference type of mode.   
+    - Use Case : Installing `cAdvisor` to every node.
+        - [cAdvisor Installation Guid](https://blog.codeship.com/monitoring-docker-containers-with-elasticsearch-and-cadvisor/)
+        - ```
+            docker service create --mode=global --name cadvisor\
+            --mount type=bind,source=/,target=/rootfs,readonly=true \
+            --mount type=bind,source=/var/run,target=/var/run,readonly=false \
+            --mount type=bind,source=/sys,target=/sys,readonly=true \
+            --mount type=bind,source=/var/lib/docker/,target=/var/lib/docker,readonly=true \
+            google/cadvisor:latest 
+          ``` 
+- Swarm Mode in incredibly Easy to Setup
+    - [SwarmKit](https://github.com/docker/swarmkit)
 
 
 

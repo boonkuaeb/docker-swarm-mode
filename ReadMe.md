@@ -307,8 +307,96 @@ Stop Container `docker stop ID`
     - [SwarmKit](https://github.com/docker/swarmkit)
 
 
+#5. Ingress Routing and Publish Ports
+**Published ports Provide External Access to Services**
+- Swarm load balancing work behind the scene.
 
+**Ingress Overlay Network**
+- Ingress Overlay network is a technical that Swarm Load Balancer.
+- There are run across between Nodes.
+- `docker network ls`. See name `ingress`
+- `docker network inspect ingress` to inspecting a detail of ingress network.By default subnet `10.255.0.0/16`
 
+**Options to routing External Traffic to Nodes**
+- Set up DNS 
+    - Server to routing traffic to one Node but If node down we cloud have a problem.
+    - We can Set  round-robin DNS or set up multiple ID for a given domain
+- External LB
+    - Create one IP Address for LB set out site swarms
+    - LB will route available node
+    - In case create new Node we will update external LB
 
+**Ingress publish Mode Routes to a Random Cluster**
+- Publish cAdvisor on 8080 port
+    - Command
+    ```
+        docker service create --mode=global --name cadvisor\
+        --mount type=bind,source=/,target=/rootfs,readonly=true \
+        --mount type=bind,source=/var/run,target=/var/run,readonly=false \
+        --mount type=bind,source=/sys,target=/sys,readonly=true \
+        --mount type=bind,source=/var/lib/docker/,target=/var/lib/docker,readonly=true \
+        --publish 8080:8080 \
+        google/cadvisor:latest 
+        
+    ```
+    - `open http://192.168.99.201:8080` It will random node. So we can't monitor a specific node.
+    
+**Remove a published port on an external Service**
+- `docker service inspect cadvisor`. Check `Ports` and See `"PublishMode": "ingress"`
+- `docker service update --publish-rm 8080 cadvisor`
+- `docker service inspect cadvisor` It still ingress network
 
+**Adding a Host Mode Published Port**
+- `docker service update --publish-add mode=host,published=8080,target=8080 cadvisor`
+- `docker service inspect cadvisor` It show `"PublishMode": "host"`
+- `open http://192.168.99.201:8080` for `m1`
+- `open http://192.168.99.211:8080` for  `w1`
 
+**Publishing a random ports**
+- Create new Service with random ports
+    - `docker service create --name nginx-random -p target=80 nginx`
+    - Check the random ports `docker service inspect nginx-random | grep PublishedPort`
+
+#6. Reconciling a Desired State
+**Quiz- What happen when we add a Node to the Swarm?**
+- Join New Node step
+    - `vagrant up w3`
+    - `docker swarm join-token worker`
+    - `export DOCKER_HOST=192.168.99.213`
+    -  ```
+        docker swarm join --token SWMTKN-1-2lvpl5x8o812d0iuqud5icrv13q8v62ssc4lsrw2plk43lzujp-8cyjkk81q4n6u6nou0ykaw8ig 192.168.99.201:2377
+        ```
+
+**Creating a Pending Service and Inspecting**
+- Run container with specific node  `docker service create --name onw4 -p 9000:80 --constraint node.hostname==w3 nginx`
+- It work fine.
+- If Run container with specific node  `docker service create --name onw5 -p 9000:80 --constraint node.hostname==w4 nginx`
+    - `w4` node not created yet.
+    - If we use `docker service ps onw5`. It shows pending.
+    - Or use `docker inspect ID` command. Status also pending.`message` node shows more infomate
+    
+**Joining a New Node to Fulfill a Pending Service**
+- Create new `w4` server and join to the node.
+- `docker service ps onw5 `
+- `docker service inspect onw5 --pretty`
+
+**What happen to a Service When we lose the Only Compatible Node?**
+- Use Case : Shutdown `w4` node
+    - `vagrant destroy -f w4`
+    - `docker service ls`
+    - We will up node Asap.
+
+**Cleaning up Nodes that have Failed**
+- `docker node rm w4`. This can use only the node that not have container in site.
+
+**Remove Vestigial Service**
+- `docker service rm onw5`
+
+**If Your app fails Then the corresponding Task will be shutdown**
+- Use Case : 
+    - `docker service create --name exploder -p 9001:3000 swarmgs/nodewebstress`. This image have a API to terminating a Application.
+    - `docker service ps exploder`
+    - Swarm will shutdown container and create new task automatically( Not guarantee running on same node)
+    
+**Scale a Service to Zero to Stop it Without Removing It** 
+- `docker service scale exploder=0`   

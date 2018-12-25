@@ -400,3 +400,38 @@ Stop Container `docker stop ID`
     
 **Scale a Service to Zero to Stop it Without Removing It** 
 - `docker service scale exploder=0`   
+
+#7. Rolling Update
+**Updates Seem to Happen all at Once**
+- Create pay Service 
+    - `docker service create --name pay --publish 6000:3000 swarmgs/payroll:1`
+    - `docker service scale pay=3`
+- Update Version
+    - `docker service update --image swarmgs/payroll:2 pay`
+- Update Version with Delay
+    - `docker service update --image swarmgs/payroll:3 --update-delay=30s --update-parallelism=2 pay`
+    - `--update-delay=30s` mean delay 30s for next update.
+    - `--update-parallelism=2` each update path 2 container
+
+- Using watch vs update in a Terminal
+    - `watch` command
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

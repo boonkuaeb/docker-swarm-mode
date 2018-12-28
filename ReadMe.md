@@ -764,3 +764,27 @@ Stop Container `docker stop ID`
     - Create multi secret for each application
         -  `echo super_secret_password_v1 | docker secret create mysql_root_passwd_v1 -`        
         -  `echo super_secret_password_v2 | docker secret create mysql_root_passwd_v2 -`        
+        - Update 'mysql_with_secret.yml'
+            ```docker
+            version: '3.1'
+            
+            services:
+                mysql:
+                    image: mysql
+                    environment:
+                        MYSQL_USER: wordpress
+                        MYSQL_DATABASE: wordpress
+                        #MYSQL_ROOT_PASSWORD: root
+                        MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+                        MYSQL_ROOT_PASSWORD_FILE: "/run/secrets/mysql_root_pass"
+                    secrets:
+                        - source: mysql_root_passwd_v2
+                          target: mysql_root_pass
+                    deploy:
+                        placement:
+                            constraints:
+                                - node.role==manager
+            secrets:
+                mysql_root_passwd_v2:
+                    external: true
+            ```

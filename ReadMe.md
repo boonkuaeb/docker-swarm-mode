@@ -415,23 +415,352 @@ Stop Container `docker stop ID`
 
 - Using watch vs update in a Terminal
     - `watch` command
+    - `watch docker serivce ls pay`
+    - `watch docker service ps pay`
+    - ./monitoring.sh is useful
+- RollOut Mode and Other update Setting are WIP
+    - `swarmkit` use `START_FIRST` options
+    - `UpdateConfig`
+        - `docker service inspect pay`
+            - `"Monitor": 5000000000,`
+            - `"Parallelism": 1`
+            - This params will change when `--update-delay=30s --update-parallelism=2`
+            
+         - We have new option `--update-failure-action=push`
+         - `Veriosn : Index` value will change when use `docker service update`
+         
+- Inspecting Task Error.
+    - `docker service ps `
+    - `docker service inspect <ID>` to see detail.
+- Rollback to Previous version
+    - `docker service uddate --rollback pay` but just rollback only 1 version.
+    - We also use `--update-failure-action=rollback` rollout tasks
+- Use `--force` to Test Changes to Update Policies
+    - Don't care any thing just create save previous configuration
+    - `docker service update --force pay`
+
+- Simulate and Monitoring update failure
+    - `watch -d -n 0.5 "docker service inspect pay | jq .[].UpdateStatus"`
+        - This command is working only `docker service update ` command.
+    - `docker service update --update-monitor=1m --update-parallelism=2 --update-delay=20s --image swarmgs/payroll:2 pay`
+    - `"State": "paused"`
+- Resuming a Paused Update
+    - `docker service update pay`
+#8. Container to Container Network
+
+- User -> Swarm LB -> bal-api.X2 -> Internal LB -> cust-api.X3
+
+**Ingress Network is Special Purpose for Publish**
+- `docker network ls` check ingress network
+- `docker network create -h` command for create
+
+**Our new Network Topology**
+
+![Network](./imgs/7-Network.png)
+
+- create backend overlay network
+    - `docker network create -d overlay --subnet=10.0.9.0/24 backend`
+        - subnet will depend on internal network. In this case vagrant is using `10.0.2.0/24`. So we can't use `10.0.2.0/24`.
+    - `docker network ls` to check new `backend` network
+        - DRIVER : `overlay`
+        - SCOPE : `swarm`
+- Inspect Network
+    - `docker network inspect backend`  
+    
+- Attaching a New Service to Out Overlay Network
+    - ```
+        docker service create --name balance \
+        -p 5000:3000 \
+        --network backend \
+        swarmgs/balance
+      ```
+    - `docker service ls` check ports
+    - `open http://192.168.99.201:5000/balance/1`. It will error because it require customer-api
+- Add a Second Service
+    - ```
+        docker service create  --name customer \
+        --network backend \
+        swarmgs/customer
+      ```
+    - `open http://192.168.99.201:5000/balance/1`. It still error.
+- View Logs
+    - `docker service logs balance` show `Using CUSTOMER_API = http://localhost:3000`
+- Adding an Environment variable 
+    - start monitoring `.monitoring.sh balance`
+    - `docker service update --env-add MYWEB_CUSTOMER_API=customer:3000 balance`
+    - `open http://192.168.99.201:5000/balance/1` should be work.
+    
+- Docker exec to check service discovery on the Overlay Network
+    - `docker service ps balance` check the NODE `w3`
+    - `export DOCKER_HOST=192.168.99.213`
+    - `docker ps`
+    - `docker exec -it CONTAINERID bash`
+    - `dig customer` to check IP Address match with subnet IP
+- Spelunking Service Container as We Scale Service
+    - `monitor.sh customer`
+    - `docker service scale customer=6`
+    - `docker exec -it CONTAINERID bash`
+    - `dig tasks.customer` Now we get all ip of customer service
+- Using CURL to validate internal load balance
+    - `curl 10.0.9.18:3000/inspect` . We need to provide `/inspect` route
+        - Result 
+            ```
+            Request: 10.0.9.18:3000
+            Local Address: 10.0.9.18
+            Local Port: 3000
+            Remote Address: 10.0.9.11
+            Remote Family: IPv4
+            Remote Port: 33850
+            Bytes Read: 85
+            Bytes Written: 0 
+            ```
+    - `Local Address ` will change every time we send the request. this is a LB logic.
+    - `watch -d -n 1 curl 10.0.9.8:3000/inspect`
+- Validate External Load Balance
+    - `open http://192.168.99.201:5000/inspect`. The Local Address is `10.255.0.45`. This is an ingress Network.
+        - From the browser Local Address tasks a lot time to change.
+        - `curl http://192.168.99.201:5000/inspect`
+
+- docker service inspect for Finding the Virtual IPs for a Service
+    - `docker service inspect balance`. `VirtualIPs` shows two node.
+    - `docker service inspect customer`. `VirtualIPs` shows only node because of the customer service not public to external load balance
+
+- Use DNS Round Robin Instead of a Virtual IP
+    - `docker service inspect customer`. Check `EndpointSpec.Mode` is `vip`
+    - Change mode to dnsrr
+        - `docker service update --endpoint-mode=dnsrr customer` 
+        - This mean we removed internal LB. 
+            - This good for performance or Not use build-in IPVs load balance
+- Networks are Lazily to Worker Node
 
 
+#9. Deploy with Stacks 
+- Remove all service `docker service remove SERVICE_NAME` 
+    - Back up 
+        - `docker service inspect viz > viz.inspect.json`    
+        - `docker service inspect customer > customer.inspect.json`    
+        - `docker service inspect balance > balance.inspect.json`    
+        - `docker network inspect backend > network.backend.inspect.json`    
+    - Remove Service
+        - `docker service rm viz balance customer`
+    - Network
+        - `docker network rm backend`
+- Create Compose file
 
+     ![Stack](./imgs/9-deploy-stack.png)
+    - `services/viz.yml`
+      ```yaml
+        version: '3.1'
+        
+        services:
+          viz:
+            image: dockersamples/visualizer
+            volumes:
+              - "/var/run/docker.sock:/var/run/docker.sock"
+            deploy:
+              placement:
+                constraints:
+                  - node.role=manager
+        ```
+    - `export DOCKER_HOST=192.168.99.201 `
+    - `docker stack deploy -c ./services/viz.yml viz`
+    - To Check
+        - `docker network ls`
+        - `docker service ls`
+        - `docker service ps viz_viz`
+        - `docker stack ls`
+        - `docker stack services viz`
+- Update a Service with a Stack is as Easy as Creating it 
+    - Update `viz.yml`
+    - Re-Run `docker stack deploy -c viz.yml viz`   
+    - `docker stack services viz`
+    - `docker stack ps viz`    
+- Remove Stack
+    - `docker stack rm viz`        
 
+- Create and Deploy Multi Service Stack
+    - create `services/apis.yml`
+    - ```yaml
+      version: '3.1'
+      
+      services:
+        customer:
+          image: swarmgs/customer
+        balance:  
+          image: swarmgs/balance
+          ports:
+            - "5000:3000"
+          environment:
+            MYWEB_CUSTOMER_API: "customer:3000"
+      ```
+    - `docker stack services apis`
+    - `docker stack ps apis` all tasks in service 
+    - `docker service ls` all service
+    - `docker service ps apis_balance`
+    - `docker service ps apis_customer`
 
+- Specifying Replicas in Compose file
+    - Update apis.yml
+    - ```yaml
+      version: '3.1'
+      
+      services:
+        customer:
+          image: swarmgs/customer
+          deploy:
+            replicas: 5
+        balance:  
+          image: swarmgs/balance
+          deploy:
+            replicas: 2
+          ports:
+            - "5000:3000"
+          environment:
+            MYWEB_CUSTOMER_API: "customer:3000"
+      ```
+- Docker Command
+    - Docker Build Service
+        - `docker run`
+        - `docker service create`
+    - Docker Deploy
+        - `docker-compose`
+        - `docker stack deploy` Use for docker swarm
+- Deploy Element
+    - ```yaml
+        deploy:
+          replicas: 6
+          update_config:
+            parallelism: 2
+            delay: 10s
+          restart_policy:
+            condition: on-failure
+          resources:
+            limits:
+              cpus: '0.50'
+              memory: 50M
+            reservations:
+              cpus: '0.25'
+              memory: 20M
+        ```   
 
+#10. Health Checking
+- Deploy a Cowsay Stack
+    - Create cowsay.yml
+    - `docker pull swarmgs/cowsay`
+    - `docker stack deploy -c cowsay.yml cow`
+    - `open http://192.168.99.201:7000`
 
+- Use Case : What happen If we break a container
+    - Application error but container still run. Docker can't catch this case
+    - `docker exec -it $(docker ps -f name=cow -q) bash`
+    - Make an Application Broke `mv /usr/games/fortune /usr/games/fortune2`
+- Automatic Service Recovery with Heath check
+    - Create new `cowsayhealth.yml`
+    - `docker stack deploy -c cowsayhealth.yml cowsayhealth`
+    - `docker exec -it $(docker ps -f name=cowsayhealth -q) bash`
+    - Make an Application Broke `mv /usr/games/fortune /usr/games/fortune2` 
+    - Application gonna recovery automatically
+- Manual forcing a Corrupted Service to Restart
+    - Restart Service 
+        - `docker service update --force calc_calc`
+        
+- Option for Adding Health Checks
+    - ```docker
+      healthcheck:
+        test: curl -f -s -S http://localhost/calc/iseverythingok || exit 1
+        interval: 5s
+        timeout: 5s
+        # retries: 3
+      ```
+    - `docker stack deploy -c calc.yml calc`
+    - `docker ps -f name=calc`
+    - `docker inspect CONTAINER_ID | jq '.[].State'`
+        - See the Node 
+           - `FailingStreak:`
+           - `Status: healhty`
+- Monitoring When Testing Health Checks
+    - Use the `monitor-health.sh` file to monitor state of service when service show failure
 
-
-
-
-
-
-
-
-
-
-
-
-
+- Health Checks Prevent Traffic to a Container That is String
+    - `watch -d -n 0.5 docker exec $(docker ps -f name=calc_calc.4) dig tasks.calc_calc`. Watch individual IP calc_calc.4
+- Health Checking with docker run (Out site Docker Swarm mode)
+    - Back to traditional `docker run`
+        - `docker stack rm calc`
+        - ```
+            docker run --rm -p 7000:80 \
+            --health-cmd "curl -f -s -S http://localhost/calc/iseverythingok || exit 1" \
+            --health-interval=5s \
+            swarmgs/calc
+           ```
+- Adding Health Check to a Dockerfile
+    - Check `Dockerfile.health`
+- Disable Health Check
+    - compose file use 
+      ```
+      healthcheck: 
+        disable: true
+      ```
+#11. Protect Secrets 
+- Creating a secret fi a MySQL Password
+    - `docker secret --h`
+    - `echo super_secret_password | docker secret create mysql_root_passwd -`
+    - `docker secret ls`
+- Granting a Service Access to a Secret
+    - ```
+        version: '3.1'
+        
+        services:
+            mysql:
+                image: mysql
+                environment: 
+                    MYSQL_USER: wordpress
+                    MYSQL_DATABASE: wordpress
+                    #MYSQL_ROOT_PASSWORD: root
+                secrets:
+                    - mysql_root_password
+        
+                deploy:
+                    placement:
+                        constraints:
+                            - node.role==manager
+        secrets:
+            mysql_root_password:
+                external: true
+      ```
+    - `docker stack deploy -c ./services/mysql_with_secret.yml mysql` The service error.
+    - `docker stack ps mysql`
+    - `docker service logs mysql_mysql`
+    - Edit `mysql_with_secret.yml`
+        `MYSQL_ALLOW_EMPTY_PASSWORD: "yes"`
+    - `docker stack deploy -c ./services/mysql_with_secret.yml mysql`
+    - `open http://192.168.99.201:8090/`
+    - `docker exec -it $(docker ps -f name=mysql_mysql -q) bash`
+    - `cat /run/secrets/mysql_root_pass`
+   
+- Using the secret file
+    - Update `./services/mysql_with_secret.yml`
+        - `MYSQL_ROOT_PASSWORD_FILE: "/run/secrets/mysql_root_pass"`  
+        - `docker stack deploy -c ./services/mysql_with_secret.yml mysql`
+        - `docker service logs mysql_mysql`
+        - `docker ps`
+        - `docker exec -it $(docker ps -f name=mysql_mysql -q) bash`
+        - `cat /run/secret/mysql_root_password`
+        - `mysql -uroot -p`
+  
+- Step to use Secrets
+    1. Create Secrets
+        - Password, SSH key, certificates
+        - <=500KB
+        - Swarm only
+        - Storage: encrypted, Replicated Raft log
+        - STDIN or file ( compose file v3 )
+    2. Grant access to service
+        - `docker service create -secret X`
+        - stack compose file - secrets section
+    3. App reads secret from /run/serects/X
+        - in-memory filesystem ( To make persist files by `docker commit`)
+        
+- _File image secrets Convention
+    - Create multi secret for each application
+        -  `echo super_secret_password_v1 | docker secret create mysql_root_passwd_v1 -`        
+        -  `echo super_secret_password_v2 | docker secret create mysql_root_passwd_v2 -`        

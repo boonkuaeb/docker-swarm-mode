@@ -1,0 +1,27 @@
+version: '3.1'
+
+services:
+  customer:
+    image: swarmgs/customer
+    deploy:
+      replicas: 6
+      update_config:
+        parallelism: 2
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 50M
+        reservations:
+          cpus: '0.25'
+          memory: 20M
+  balance:
+    image: swarmgs/balance
+    deploy:
+      replicas: 2
+    ports:
+      - "5000:3000"
+    environment:
+      MYWEB_CUSTOMER_API: "customer:3000"

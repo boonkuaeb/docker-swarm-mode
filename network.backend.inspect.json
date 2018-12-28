@@ -1,0 +1,72 @@
+[
+    {
+        "Name": "backend",
+        "Id": "5jce2dawzsvah3n5o1mwnxaxv",
+        "Created": "2018-12-26T05:59:00.203547209Z",
+        "Scope": "swarm",
+        "Driver": "overlay",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "10.0.9.0/24",
+                    "Gateway": "10.0.9.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "6349872453d3635d7e0d766952c25f084cdc0e02031f92d14fc5d752e6a67748": {
+                "Name": "customer.3.ycyzoz2mu27o07yo33dp6ri5a",
+                "EndpointID": "7e6673e5124d74eb3b59b4205c878b4c291f82f072f7b918217624c7f6459a99",
+                "MacAddress": "02:42:0a:00:09:18",
+                "IPv4Address": "10.0.9.24/24",
+                "IPv6Address": ""
+            },
+            "d9764e4f83128fd3097f8aca8beef22820e2db91680c390f95d316b885ac7d1c": {
+                "Name": "customer.1.zwrzhjm1s0xi9xs3xq52rlm1t",
+                "EndpointID": "31b54e8d70bd03bd9c3f53ce6b97bb3f9474e52d0cce9458402a0d2ee338f067",
+                "MacAddress": "02:42:0a:00:09:19",
+                "IPv4Address": "10.0.9.25/24",
+                "IPv6Address": ""
+            },
+            "lb-backend": {
+                "Name": "backend-endpoint",
+                "EndpointID": "cace3df9be6ab95fd20bbae13e26b9e9470903c4cb797766a70bd065267b0a8b",
+                "MacAddress": "02:42:0a:00:09:10",
+                "IPv4Address": "10.0.9.16/24",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {
+            "com.docker.network.driver.overlay.vxlanid_list": "4098"
+        },
+        "Labels": {},
+        "Peers": [
+            {
+                "Name": "1fc57cfaf1d9",
+                "IP": "192.168.99.211"
+            },
+            {
+                "Name": "d300d1d0c6d1",
+                "IP": "192.168.99.212"
+            },
+            {
+                "Name": "bebb44c259d1",
+                "IP": "192.168.99.213"
+            },
+            {
+                "Name": "96603665d072",
+                "IP": "192.168.99.201"
+            }
+        ]
+    }
+]
